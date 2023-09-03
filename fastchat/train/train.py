@@ -227,7 +227,7 @@ class HFDataset(Dataset):
     def __init__(
             self,
             hf_dataset: DatasetDict,
-            tokenizer: PreTrainedTokenizer,
+            tokenizer: transformers.PreTrainedTokenizer,
             human_key,
             gpt_key,
     ):
