@@ -15,6 +15,7 @@
 #    limitations under the License.
 
 from dataclasses import dataclass, field
+import functools
 import json
 import math
 import pathlib
@@ -47,7 +48,15 @@ class DataArguments:
         default=None, metadata={"help": "Path to the evaluation data."}
     )
     lazy_preprocess: bool = False
+    hf_dataset_preprocess: bool = False
+    hf_dataset_human_key: Optional[str] = field(default=None)
+    hf_dataset_gpt_key: Optional[str] = field(default=None)
 
+    def __post_init__(self):
+        if self.hf_dataset_preprocess:
+            if self.hf_dataset_human_key is None or self.hf_dataset_gpt_key is None:
+                raise ValueError("If hf_dataset_preprocess is set, hf_dataset_human_key"
+                                 " and hf_dataset_gpt_key must also be set.")
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -211,14 +220,58 @@ class LazySupervisedDataset(Dataset):
 
         return ret
 
+class HFDataset(Dataset):
+    """Dataset on Hugging Face for supervised fine-tuning (lazy)"""
+
+    def __init__(
+            self,
+            hf_dataset: DatasetDict,
+            tokenizer: PreTrainedTokenizer,
+            human_key="prompt",
+            gpt_key="response",
+    ):
+        super(HFDataset, self).__init__()
+
+        def dataset_to_sources(ds):
+            for row in ds:
+                yield [
+                    {"from": "human", "value": row[human_key]},
+                    {"from": "gpt", "value": row[gpt_key]}
+                ]
+
+        sources = dataset_to_sources(hf_dataset)
+        data_dict = preprocess(sources, tokenizer)
+
+        self.input_ids = data_dict["input_ids"]
+        self.labels = data_dict["labels"]
+        self.attention_mask = data_dict["attention_mask"]
+
+    def __len__(self):
+        return len(self.input_ids)
+
+    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
+        return dict(
+            input_ids=self.input_ids[i],
+            labels=self.labels[i],
+            attention_mask=self.attention_mask[i],
+        )
+
 
 def make_supervised_data_module(
     tokenizer: transformers.PreTrainedTokenizer, data_args
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    dataset_cls = (
-        LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
-    )
+    if data_args.lazy_preprocess:
+        dataset_cls = LazySupervisedDataset
+    elif data_args.hf_dataset_preprocess:
+        dataset_cls = partial(
+            HFDataset,
+            human_key=data_args.hf_dataset_human_key,
+            gpt_key=data_args.hf_dataset_gpt_key,
+        )
+    else:
+        dataset_cls = SupervisedDataset
+
     rank0_print("Loading data...")
 
     train_json = json.load(open(data_args.data_path, "r"))
