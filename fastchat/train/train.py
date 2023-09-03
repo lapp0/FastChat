@@ -228,8 +228,8 @@ class HFDataset(Dataset):
             self,
             hf_dataset: DatasetDict,
             tokenizer: PreTrainedTokenizer,
-            human_key="prompt",
-            gpt_key="response",
+            human_key,
+            gpt_key,
     ):
         super(HFDataset, self).__init__()
 
