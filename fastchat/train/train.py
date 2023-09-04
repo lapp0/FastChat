@@ -262,25 +262,29 @@ def make_supervised_data_module(
     tokenizer: transformers.PreTrainedTokenizer, data_args
 ) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    if data_args.lazy_preprocess:
-        dataset_cls = LazySupervisedDataset
-    elif data_args.hf_dataset_preprocess:
-        dataset_cls = partial(
+    if data_args.hf_dataset_preprocess:
+        dataset_cls = functools.partial(
             HFDataset,
             human_key=data_args.hf_dataset_human_key,
             gpt_key=data_args.hf_dataset_gpt_key,
         )
+        def get_data(uri):
+            project, dataset_name, split = uri.split('/')
+            return load_dataset(project + '/' + dataset_name, split=split)
+
     else:
-        dataset_cls = SupervisedDataset
+        dataset_cls = LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
+        get_data = lambda uri: json.load(open(uri, "r"))
 
     rank0_print("Loading data...")
 
-    train_json = json.load(open(data_args.data_path, "r"))
-    train_dataset = dataset_cls(train_json, tokenizer=tokenizer)
+    train_data = get_data(data_args.data_path)
+    train_dataset = dataset_cls(train_data, tokenizer=tokenizer)
 
     if data_args.eval_data_path:
-        eval_json = json.load(open(data_args.eval_data_path, "r"))
-        eval_dataset = dataset_cls(eval_json, tokenizer=tokenizer)
+        eval_data = get_data(data_args.eval_data_path)
+        eval_dataset = dataset_cls(eval_data, tokenizer=tokenizer)
+
     else:
         eval_dataset = None
 
